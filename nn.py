@@ -23,7 +23,7 @@ def to_tensor(x):
 
 
 class SingleQ(nn.Module):
-    def __init__(self, actions_n=5, w=512, h=512, features_n=32):
+    def __init__(self, actions_n=5, w=512, h=512, features_n=64):
         super(SingleQ, self).__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
         self.conv1.cuda()
