@@ -2,7 +2,7 @@ from collections import deque, namedtuple
 import random
 import matplotlib.pyplot as plt
 import numpy as np
-
+import copy
 from nn import CentralNN
 import torch
 
@@ -91,10 +91,8 @@ class QTran:
         self.t_theta = self.theta
         self.fresh_start = fresh_start
         self.policy_net = CentralNN()
-        self.policy_net.cuda()
-        self.target_net = CentralNN()
-        self.target_net.cuda()
-        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.target_net = copy.deepcopy(self.policy_net)
+        # self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
@@ -105,7 +103,7 @@ class QTran:
         if flip > self.epsilon or test:
             with torch.no_grad():
                 # q_values = self.policy_net(observations)[0]
-                q_values = {agent: singleQ(observations[agent])[0].cpu().numpy() for singleQ, agent in
+                q_values = {agent: np.array(singleQ(observations[agent])[0].detach()) for singleQ, agent in
                             zip(self.policy_net.singleQs, observations)}
                 actions = {agent: q_values[agent].argmax() for agent in observations}
                 return actions
@@ -128,7 +126,7 @@ class QTran:
         for epoch in range(start_epoch, start_epoch + epochs_n):
             print(f'Running epoch {epoch}')
             start_event.record()
-            losses = self.train_epoch(env)
+            losses = self.train_epoch(env, epoch=epoch)
             end_event.record()
             torch.cuda.synchronize()
             epoch_duration_ms = start_event.elapsed_time(end_event)
@@ -155,23 +153,24 @@ class QTran:
             self.save_model(epoch, epoch_data)
         plot(x, score, scores, episode_steps, loss)
 
-    def train_epoch(self, env, steps_n=100000, target_update=1000):
+    def train_epoch(self, env, steps_n=90000, target_update=1000, epoch=0):
+        print(f'Starting epoch {epoch} training')
         # sync_event = torch.cuda.Event()
-        # start_event = torch.cuda.Event(enable_timing=True)
-        # end_event = torch.cuda.Event(enable_timing=True)
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
         episode = 0
         steps = 0
         episode_steps = 0
-        self.target_net.load_state_dict(self.policy_net.state_dict())
+        # self.target_net.load_state_dict(self.policy_net.state_dict())
         observations = env.reset()
         losses = {'loss': None, 'loss_td': None, 'loss_opt': None, 'loss_nopt': None}
+        start_event.record()
         while steps <= steps_n:
             episode += 1
             steps += episode_steps
             episode_steps = 0
             dones = [False] * 4
-            # start_event.record()
-            while not all(dones) and steps <= steps_n:
+            while not all(dones) and steps + episode_steps <= steps_n:
                 episode_steps += 1
                 actions = self.choose_actions(observations)
                 observations_n, rewards, dones, _ = env.step(actions)
@@ -209,9 +208,12 @@ class QTran:
                     self.optimizer.step()
                 self.epsilon = max(0.05, self.epsilon * self.epsilon_decay)
 
-                if steps % target_update == 0:
-                    print(f'Update target at step: {steps}')
+                if (steps + episode_steps) % target_update == 0:
+                    end_event.record()
+                    torch.cuda.synchronize()
+                    print(f'Update target at step: {steps+episode_steps} took {start_event.elapsed_time(end_event)}ms')
                     self.target_net.load_state_dict(self.policy_net.state_dict())
+                    start_event.record()
 
             # if episode % 10 == 0 or episode == 1:
             #     end_event.record()

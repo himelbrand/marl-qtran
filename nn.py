@@ -70,8 +70,8 @@ class SingleQ(nn.Module):
 
 
 class JointV(nn.Module):
-    def __init__(self, features_n=32, agents_n=4):
-        super(JointV, self).__init__()
+    def __init__(self, features_n=64, agents_n=4):
+        super().__init__()
         self.hidden = nn.Linear(features_n, features_n//2)
         self.hidden.cuda()
         self.v = nn.Linear(features_n//2, agents_n)
@@ -84,7 +84,7 @@ class JointV(nn.Module):
 
 
 class JointQ(nn.Module):
-    def __init__(self, features_n=32, agents_n=4, actions_n=5):
+    def __init__(self, features_n=64, agents_n=4, actions_n=5):
         super().__init__()
         self.hidden = nn.Linear(features_n, features_n // 2)
         self.hidden.cuda()
