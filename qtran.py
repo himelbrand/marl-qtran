@@ -84,7 +84,7 @@ class ReplayBuffer(object):
 
 class QTran:
     def __init__(self, knights_n=2, archers_n=2, fresh_start=True, epsilon=1, epsilon_decay=0.99999, cpu=False,
-                 gamma=0.7):
+                 gamma=0.95):
         self.using_cuda = torch.cuda.is_available()
         self.device = torch.device("cpu" if not self.using_cuda or cpu else "cuda")
         self.agents_n = knights_n + archers_n

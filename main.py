@@ -91,32 +91,34 @@ q_tran = QTran()
 q_tran.train(env)
 print('Done training...')
 exit(0)
-policy = q_tran.get_policy()
+for i in range(11, 12):
+    policy = q_tran.get_policy(epoch=i)
 
 
-def run_policy():
-    # scoring and steps of episode
-    observations = env.reset()
-    scores = {a: 0 for a in env.agents}
-    steps = 0
-    env.aec_env.env.render()
-    # Running a single episode
-    dones = [False] * 4
-    while not all(dones):
-        actions = choose_actions(policy, observations)
-        observations, rewards, dones, _ = env.step(actions)
-        dones = dones.values()
-        for a in rewards:
-            scores[a] += rewards[a]
-        steps += 1
+    def run_policy():
+        # scoring and steps of episode
+        observations = env.reset()
+        scores = {a: 0 for a in env.agents}
+        steps = 0
         env.aec_env.env.render()
+        # Running a single episode
+        dones = [False] * 4
+        while not all(dones):
+            actions = choose_actions(policy, observations)
+            observations, rewards, dones, _ = env.step(actions)
+            dones = dones.values()
+            for a in rewards:
+                scores[a] += rewards[a]
+            steps += 1
+            env.aec_env.env.render()
 
-    env.aec_env.env.close()
-    print(f'Episode done with total score: {sum(scores.values())} and total steps of: {steps}')
-    print('Individual scores:')
-    for a in scores:
-        print(f'{a}: {scores[a]}')
+        env.aec_env.env.close()
+        print(f'Epoch {i}')
+        print(f'Episode done with total score: {sum(scores.values())} and total steps of: {steps}')
+        print('Individual scores:')
+        for a in scores:
+            print(f'{a}: {scores[a]}')
 
 
-run_policy()
+    run_policy()
 
