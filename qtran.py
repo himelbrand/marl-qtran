@@ -137,7 +137,7 @@ class QTran:
                 end_event.record()
                 torch.cuda.synchronize()
             epoch_duration_ms = start_event.elapsed_time(end_event)
-            print(f'Running single evaluation with rendering...')
+            print(f'Running evaluation...')
             self.policy_net.eval()
             eval_score, eval_steps, eval_scores = self.evaluate(env)
             self.policy_net.train()
