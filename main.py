@@ -52,13 +52,13 @@ def load_checkpoint(epoch, path='out/epochs/epoch'):
     return checkpoint
 
 
-def plot_all(s_epoch=0,e_epoch=10):
+def plot_all(s_epoch=0, e_epoch=5):
     epochs = []
     score = []
     scores = []
     steps = []
     loss = []
-    for epoch in range(s_epoch,e_epoch+1):
+    for epoch in range(s_epoch, e_epoch+1):
         checkpoint = load_checkpoint(epoch)
         epochs.append(epoch)
         score.append(checkpoint['eval_score'])
@@ -88,7 +88,7 @@ env = to_parallel(env)
 # init Qtran
 q_tran = QTran()
 
-q_tran.train(env)
+q_tran.train(env, start_epoch=6)
 print('Done training...')
 policy = q_tran.get_policy()
 

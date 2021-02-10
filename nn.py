@@ -82,7 +82,8 @@ class JointV(nn.Module):
             self.v.cuda()
 
     def forward(self, x):
-        x = torch.sigmoid(self.hidden(x))
+        # x = torch.sigmoid(self.hidden(x))
+        x = F.relu(self.hidden(x))
         x = self.v(x)
         return torch.mean(x)
 
@@ -97,7 +98,8 @@ class JointQ(nn.Module):
             self.q.cuda()
 
     def forward(self, x):
-        x = torch.sigmoid(self.hidden(x))
+        # x = torch.sigmoid(self.hidden(x))
+        x = F.relu(self.hidden(x))
         x = self.q(x)
         return x
 
