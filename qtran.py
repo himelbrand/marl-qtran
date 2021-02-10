@@ -158,7 +158,7 @@ class QTran:
             episode_steps.append(eval_steps)
             loss.append(losses['loss'].item())
             print(
-                f'Finished epoch {epoch} - took {epoch_duration_ms / 1000} seconds or {epoch_duration_ms / 60000} minutes - current loss is {loss[-1].item()} - total average score from evaluation is {eval_score} - average step for episode in evaluation is {eval_steps}')
+                f'Finished epoch {epoch} - took {epoch_duration_ms / 1000} seconds or {epoch_duration_ms / 60000} minutes - current loss is {loss[-1]} - total average score from evaluation is {eval_score} - average step for episode in evaluation is {eval_steps}')
             self.save_model(epoch, epoch_data)
         plot(x, score, scores, episode_steps, loss)
 
