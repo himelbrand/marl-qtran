@@ -4,12 +4,12 @@ from torch import nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-print(torch.cuda.is_available())
+print(f'Is CUDA available? {torch.cuda.is_available()}')
 
 
-def to_tensor(x):
+def to_tensor(x, using_cuda=False):
     transform = T.ToTensor()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if using_cuda else "cpu")
     if x.shape == (512, 512, 3):
         out = transform(x).unsqueeze(0).to(device)
     else:
@@ -23,20 +23,15 @@ def to_tensor(x):
 
 
 class SingleQ(nn.Module):
-    def __init__(self, actions_n=5, w=512, h=512, features_n=64):
+    def __init__(self, actions_n=5, w=512, h=512, features_n=64, using_cuda=False):
         super(SingleQ, self).__init__()
+        self.using_cuda = using_cuda
         self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
-        self.conv1.cuda()
         self.bn1 = nn.BatchNorm2d(16)
-        self.bn1.cuda()
         self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2)
-        self.conv2.cuda()
         self.bn2 = nn.BatchNorm2d(32)
-        self.bn2.cuda()
         self.conv3 = nn.Conv2d(32, 32, kernel_size=5, stride=2)
-        self.conv3.cuda()
         self.bn3 = nn.BatchNorm2d(32)
-        self.bn3.cuda()
 
         def conv2d_size_out(size, kernel_size=5, stride=2):
             return (size - (kernel_size - 1) - 1) // stride + 1
@@ -46,16 +41,24 @@ class SingleQ(nn.Module):
         linear_input_size = conv_h * conv_w * 32
 
         self.hidden_v = nn.Linear(linear_input_size, features_n)
-        self.hidden_v.cuda()
         self.hidden_q = nn.Linear(linear_input_size, features_n)
-        self.hidden_q.cuda()
         self.q = nn.Linear(features_n * 2, actions_n)
-        self.q.cuda()
+
+        if using_cuda:
+            self.conv1.cuda()
+            self.bn1.cuda()
+            self.conv2.cuda()
+            self.bn2.cuda()
+            self.conv3.cuda()
+            self.bn3.cuda()
+            self.hidden_v.cuda()
+            self.hidden_q.cuda()
+            self.q.cuda()
 
     def forward(self, x):
         obs = x
         if not isinstance(obs, torch.Tensor):
-            obs = to_tensor(obs)
+            obs = to_tensor(obs, using_cuda=self.using_cuda)
         # if len(obs.shape) == 3:
         #     print(obs.shape)
         #     obs = obs.unsqueeze(0)
@@ -70,12 +73,13 @@ class SingleQ(nn.Module):
 
 
 class JointV(nn.Module):
-    def __init__(self, features_n=64, agents_n=4):
+    def __init__(self, features_n=64, agents_n=4, using_cuda=False):
         super().__init__()
         self.hidden = nn.Linear(features_n, features_n//2)
-        self.hidden.cuda()
         self.v = nn.Linear(features_n//2, agents_n)
-        self.v.cuda()
+        if using_cuda:
+            self.hidden.cuda()
+            self.v.cuda()
 
     def forward(self, x):
         x = torch.sigmoid(self.hidden(x))
@@ -84,12 +88,13 @@ class JointV(nn.Module):
 
 
 class JointQ(nn.Module):
-    def __init__(self, features_n=64, agents_n=4, actions_n=5):
+    def __init__(self, features_n=64, agents_n=4, actions_n=5, using_cuda=False):
         super().__init__()
         self.hidden = nn.Linear(features_n, features_n // 2)
-        self.hidden.cuda()
         self.q = nn.Linear(features_n // 2, actions_n ** agents_n)
-        self.q.cuda()
+        if using_cuda:
+            self.hidden.cuda()
+            self.q.cuda()
 
     def forward(self, x):
         x = torch.sigmoid(self.hidden(x))
@@ -98,15 +103,16 @@ class JointQ(nn.Module):
 
 
 class CentralNN(nn.Module):
-    def __init__(self, agents_n=4):
+    def __init__(self, agents_n=4, using_cuda=False):
         super().__init__()
-        self.singleQs = [SingleQ() for _ in range(agents_n)]
-        for s in self.singleQs:
-            s.cuda()
-        self.jointV = JointV()
-        self.jointV.cuda()
-        self.jointQ = JointQ()
-        self.jointQ.cuda()
+        self.singleQs = [SingleQ(using_cuda=using_cuda) for _ in range(agents_n)]
+        self.jointV = JointV(using_cuda=using_cuda)
+        self.jointQ = JointQ(using_cuda=using_cuda)
+        if using_cuda:
+            self.jointV.cuda()
+            self.jointQ.cuda()
+            for s in self.singleQs:
+                s.cuda()
 
     def forward(self, observations):
         singles_out = {agent: singleQ(observations[agent]) for singleQ, agent in zip(self.singleQs, observations)}
