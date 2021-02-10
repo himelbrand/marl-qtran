@@ -175,19 +175,18 @@ class QTran:
         # self.target_net.load_state_dict(self.policy_net.state_dict())
         observations = env.reset()
         losses = {'loss': None, 'loss_td': None, 'loss_opt': None, 'loss_nopt': None}
-
         while steps <= steps_n:
             episode += 1
             steps += episode_steps
             episode_steps = 0
-            dones = [False] * 4
-            while not all(dones) and steps + episode_steps <= steps_n:
+            env_done = False
+            while not env_done and steps + episode_steps <= steps_n:
                 episode_steps += 1
                 actions = self.choose_actions(observations)
                 observations_n, rewards, dones, _ = env.step(actions)
-                dones = dones.values()
+                env_done = all(dones.values())
                 reward = sum(rewards.values())
-                if not env.env_done:
+                if not env_done:
                     self.replay_buffer.add_to_memory((observations, actions, reward, observations_n))
                 sample = self.replay_buffer.sample_from_memory()
                 if sample:
@@ -292,13 +291,14 @@ class QTran:
             curr_steps = 0
             if debug:
                 env.aec_env.env.render()
-            dones = [False] * 4
+            # dones = [False] * 4
+            env_done = False
             # Running a single episode
-            while not all(dones):
+            while not env_done:
                 actions = self.choose_actions(observations, test=True)
                 # try:
                 observations, rewards, dones, _ = env.step(actions)
-                dones = dones.values()
+                env_done = all(dones.values())
                 # except Exception as e:
                 #     print(actions)
                 #     print(e.tr)
