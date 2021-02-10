@@ -88,8 +88,9 @@ env = to_parallel(env)
 # init Qtran
 q_tran = QTran()
 
-q_tran.train(env, start_epoch=6)
+q_tran.train(env)
 print('Done training...')
+exit(0)
 policy = q_tran.get_policy()
 
 

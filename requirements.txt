@@ -1,0 +1,6 @@
+numpy~=1.20.0
+torch~=1.7.1
+torchvision~=0.8.2
+matplotlib~=3.3.2
+pettingzoo~=1.5.2
+supersuit~=2.5.0
