@@ -116,11 +116,11 @@ class QTran:
             return actions
 
     def train(self, env, start_epoch=0, epochs_n=100):
-        x = []
-        score = []
-        scores = []
-        episode_steps = []
-        loss = []
+        # x = []
+        # score = []
+        # scores = []
+        # episode_steps = []
+        # loss = []
         print('Running QTran training!')
         if self.using_cuda:
             start_event = torch.cuda.Event(enable_timing=True)
@@ -152,15 +152,15 @@ class QTran:
             for loss_name in losses:
                 epoch_data[loss_name] = losses[loss_name]
             # Add for plot data
-            x.append(epoch)
-            score.append(eval_score)
-            scores.append(eval_scores)
-            episode_steps.append(eval_steps)
-            loss.append(losses['loss'].item())
+            # x.append(epoch)
+            # score.append(eval_score)
+            # scores.append(eval_scores)
+            # episode_steps.append(eval_steps)
+            # loss.append()
             print(
-                f'Finished epoch {epoch} - took {epoch_duration_ms / 1000} seconds or {epoch_duration_ms / 60000} minutes - current loss is {loss[-1]} - total average score from evaluation is {eval_score} - average step for episode in evaluation is {eval_steps}')
+                f'Finished epoch {epoch} - took {epoch_duration_ms / 1000} seconds or {epoch_duration_ms / 60000} minutes - current loss is {losses["loss"].item()} - total average score from evaluation is {eval_score} - average step for episode in evaluation is {eval_steps}')
             self.save_model(epoch, epoch_data)
-        plot(x, score, scores, episode_steps, loss)
+        # plot(x, score, scores, episode_steps, loss)
 
     def train_epoch(self, env, steps_n=1000, target_update=100, epoch=0):
         print(f'Starting epoch {epoch} training')
