@@ -3,7 +3,7 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 import copy
-from nn import CentralNN
+from nn import CentralNN, convert_to_one_hot_actions
 import torch
 
 Transition = namedtuple('Transition',
@@ -44,22 +44,22 @@ def plot(epochs, score, scores, steps, loss):
 
 def actions2index(u):
     i = 0
-    if len(u) > 4:
+    if len(u) > 15:
         ans = []
         for a in u:
             i = 0
-            for n, e in zip(a, range(4)):
-                i += n * 5 ** e
+            for n, e in zip(a, range(12)):
+                i += n * 3 ** e
             ans.append(i)
         return ans
     else:
-        for n, e in zip(u, range(4)):
-            i += n * 5 ** e
+        for n, e in zip(u, range(12)):
+            i += n * 3 ** e
         return i
 
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size=50000, batch_size=16):
+    def __init__(self, buffer_size=100000, batch_size=10):
         self.replay_memory_capacity = buffer_size
         self.batch_size = batch_size
         self.replay_memory = deque(maxlen=self.replay_memory_capacity)
@@ -83,17 +83,17 @@ class ReplayBuffer(object):
 # 637592.9375ms
 
 class QTran:
-    def __init__(self, knights_n=2, archers_n=2, fresh_start=True, epsilon=1, epsilon_decay=0.99995, cpu=False,
-                 gamma=0.95):
+    def __init__(self, piston_n=20, fresh_start=True, epsilon=1, epsilon_decay=0.99995, cpu=False,
+                 gamma=1):
         self.using_cuda = torch.cuda.is_available()
         self.device = torch.device("cpu" if not self.using_cuda or cpu else "cuda")
-        self.agents_n = knights_n + archers_n
+        self.agents_n = piston_n
         self.replay_buffer = ReplayBuffer()
         self.gamma = gamma
         self.theta = None
         self.t_theta = self.theta
         self.fresh_start = fresh_start
-        self.policy_net = CentralNN(using_cuda=self.using_cuda)
+        self.policy_net = CentralNN(using_cuda=self.using_cuda, agents_n=piston_n)
         self.target_net = copy.deepcopy(self.policy_net)
         # self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
@@ -101,18 +101,24 @@ class QTran:
         self.epsilon_decay = epsilon_decay
         self.optimizer = torch.optim.Adam(self.policy_net.parameters())
 
-    def choose_actions(self, observations, greedy=False):
+    def choose_actions(self, observations, actions, greedy=False):
         flip = random.random()
+        actions = convert_to_one_hot_actions(actions, self.device)
         if flip > self.epsilon or greedy:
+            # with torch.no_grad():
+            #     q_values = self.policy_net(observations, actions)[0]
+            #     # q_values = {agent: singleQ(observations[agent])[0].numpy() for singleQ, agent in
+            #     #             zip(self.policy_net.singleQs, observations)}
+            #     actions = {agent: q_values[agent].argmax().item() for agent in observations}
+            #     # print(actions)
+            #     return actions
             with torch.no_grad():
-                q_values = self.policy_net(observations)[0]
-                # q_values = {agent: singleQ(observations[agent])[0].numpy() for singleQ, agent in
-                #             zip(self.policy_net.singleQs, observations)}
+                q_values = {agent: singleQ(observations[agent], actions[agent])[0] for singleQ, agent in
+                            zip(self.policy_net.singleQs, observations)}
                 actions = {agent: q_values[agent].argmax().item() for agent in observations}
-                # print(actions)
                 return actions
         else:
-            actions = {a: random.randint(0, 4) for a in observations}
+            actions = {a: random.randint(0, 2) for a in observations}
             return actions
 
     def train(self, env, start_epoch=0, epochs_n=100):
@@ -126,10 +132,32 @@ class QTran:
             start_event = torch.cuda.Event(enable_timing=True)
             end_event = torch.cuda.Event(enable_timing=True)
         if start_epoch > 0:
-            losses = self.load_model(start_epoch - 1)
-            print(losses)
+            self.load_model(start_epoch - 1)
+            # print(losses)
+        else:
+            print('Started evaluating initial policy...')
+            self.policy_net.eval()
+            eval_score, eval_steps, eval_scores = self.evaluate(env, episodes_n=10)
+            self.policy_net.train()
+
+            epoch_data = {
+                'epoch': 0,
+                'eval_score': eval_score,
+                'eval_steps': eval_steps,
+                'eval_scores': eval_scores,
+                'epoch_duration_ms': 0,
+                'epsilon': self.epsilon,
+                'loss': torch.tensor(0),
+                'loss_td': torch.tensor(0),
+                'loss_opt': torch.tensor(0),
+                'loss_nopt': torch.tensor(0)
+            }
+            self.save_model(0, epoch_data)
+            print(f'Finished evaluating initial policy... average total score was: {eval_score}')
+            start_epoch = 1
+        torch.cuda.empty_cache()
         for epoch in range(start_epoch, start_epoch + epochs_n):
-            print(f'Running epoch {epoch}')
+            print(f'Running Qtran epoch #{epoch}')
             if self.using_cuda:
                 start_event.record()
             losses = self.train_epoch(env, epoch=epoch)
@@ -139,7 +167,7 @@ class QTran:
             epoch_duration_ms = start_event.elapsed_time(end_event)
             print(f'Running evaluation...')
             self.policy_net.eval()
-            eval_score, eval_steps, eval_scores = self.evaluate(env)
+            eval_score, eval_steps, eval_scores = self.evaluate(env, episodes_n=10)
             self.policy_net.train()
             epoch_data = {
                 'epoch': epoch,
@@ -160,20 +188,17 @@ class QTran:
             print(
                 f'Finished epoch {epoch} - took {epoch_duration_ms / 1000} seconds or {epoch_duration_ms / 60000} minutes - current loss is {losses["loss"].item()} - total average score from evaluation is {eval_score} - average step for episode in evaluation is {eval_steps}')
             self.save_model(epoch, epoch_data)
+            if epoch % 5 == 0:
+                self.target_net.load_state_dict(self.policy_net.state_dict())
         # plot(x, score, scores, episode_steps, loss)
 
-    def train_epoch(self, env, steps_n=1000, target_update=100, epoch=0):
+    def train_epoch(self, env, steps_n=1000, epoch=0):
         print(f'Starting epoch {epoch} training')
-        # sync_event = torch.cuda.Event()
-        # if self.using_cuda:
-        #     start_event = torch.cuda.Event(enable_timing=True)
-        #     end_event = torch.cuda.Event(enable_timing=True)
-        #     start_event.record()
         episode = 0
         steps = 0
         episode_steps = 0
-        # self.target_net.load_state_dict(self.policy_net.state_dict())
         observations = env.reset()
+        actions = {a: 1 for a in env.agents}
         losses = {'loss': None, 'loss_td': None, 'loss_opt': None, 'loss_nopt': None}
         while steps <= steps_n:
             episode += 1
@@ -182,7 +207,7 @@ class QTran:
             env_done = False
             while not env_done and steps + episode_steps <= steps_n:
                 episode_steps += 1
-                actions = self.choose_actions(observations)
+                actions = self.choose_actions(observations, actions)
                 observations_n, rewards, dones, _ = env.step(actions)
                 env_done = all(dones.values())
                 reward = sum(rewards.values())
@@ -191,24 +216,29 @@ class QTran:
                 sample = self.replay_buffer.sample_from_memory()
                 if sample:
                     batch = Transition(*zip(*sample))
-                    batch_idx = range(self.replay_buffer.batch_size)
+                    # batch_idx = range(self.replay_buffer.batch_size)
                     tau_batch = {a: np.array([tau_tag[a] for tau_tag in batch.tau]) for a in observations}
-                    actions_batch = torch.tensor([actions2index(x.values()) for x in batch.u], device=self.device)
+                    actions_batch = batch.u # torch.tensor([actions2index(x.values()) for x in batch.u], device=self.device)
                     reward_batch = torch.tensor(batch.r, device=self.device)
                     tau_tag_batch = {a: np.array([tau_tag[a] for tau_tag in batch.tau_tag]) for a in observations}
-                    q_singles, q_jt, _ = self.target_net(tau_tag_batch)
-                    u_bar = torch.tensor(
-                        actions2index(torch.stack([torch.argmax(q_singles[a], dim=1) for a in q_singles], dim=1)),
-                        device=self.device)
-                    y_dqn = reward_batch + self.gamma * q_jt[batch_idx, u_bar]
-                    q_singles, q_jt, v_jt = self.policy_net(tau_batch)
+                    q_singles_target, q_jt_target, _ = self.target_net(tau_tag_batch, actions_batch)
+                    # u_bar_tag = torch.tensor(
+                    #     actions2index(torch.stack([torch.argmax(q_singles_target[a], dim=1) for a in q_singles_target], dim=1)),
+                    #     device=self.device)
+                    u_bar_tag = {a: torch.argmax(q_singles_target[a], dim=1).cpu().numpy() for a in q_singles_target}
+                    _, q_jt_target_opt, _ = self.target_net(tau_tag_batch, u_bar_tag)
+                    y_dqn = reward_batch + self.gamma * q_jt_target_opt
+                    q_singles, q_jt, v_jt = self.policy_net(tau_batch, actions_batch)
                     q_jt_hat = q_jt.detach()
-                    loss_td = torch.sum((q_jt[batch_idx, actions_batch] - y_dqn) ** 2)
+                    u_bar = {a: torch.argmax(q_singles[a], dim=1).cpu().numpy() for a in q_singles}
+                    _, q_jt_opt, _ = self.policy_net(tau_batch, u_bar)
+                    q_jt_hat_opt = q_jt_opt.detach()
+                    loss_td = torch.sum((q_jt - y_dqn) ** 2)
                     q_jt_tag_opt = sum([torch.max(q_singles[a]) for a in q_singles])
-                    loss_opt = torch.sum((q_jt_tag_opt - q_jt_hat[batch_idx, u_bar] + v_jt) ** 2)
+                    loss_opt = torch.sum((q_jt_tag_opt - q_jt_hat_opt + v_jt) ** 2)
                     q_jt_tag_nopt = torch.tensor(
                         [sum([q_singles[a][0][us[a]] for a in q_singles]) for us in batch.u], device=self.device)
-                    loss_nopt = torch.sum(torch.min(q_jt_tag_nopt - q_jt_hat[batch_idx, actions_batch] + v_jt,
+                    loss_nopt = torch.sum(torch.min(q_jt_tag_nopt - q_jt_hat + v_jt,
                                                     torch.tensor(0).to(self.device)) ** 2)
                     loss = loss_td + loss_opt + loss_nopt
                     self.optimizer.zero_grad()
@@ -218,29 +248,12 @@ class QTran:
                         param.grad.data.clamp_(-1, 1)
                     self.optimizer.step()
                 self.epsilon = max(0.05, self.epsilon * self.epsilon_decay)
-
-                if (steps + episode_steps) % target_update == 0:
-                    # if self.using_cuda:
-                    #     end_event.record()
-                    #     torch.cuda.synchronize()
-                    # print(
-                    #     f'Update target at step: {steps + episode_steps} took {start_event.elapsed_time(end_event)}ms')
-                    self.target_net.load_state_dict(self.policy_net.state_dict())
-                    # if self.using_cuda:
-                    #     start_event.record()
-
-            # if episode % 10 == 0 or episode == 1:
-            #     end_event.record()
-            #     torch.cuda.synchronize()
-            #     print(f'episode {episode} took {start_event.elapsed_time(end_event)}ms with {episode_steps} steps', end='\n' if steps > steps_n else '\r')
-            #     sync_event.record()
-            #     torch.cuda.synchronize()
-
         return losses
 
     def load_model(self, epoch, path='out/epochs/epoch', training=True):
         filepath = f'{path}{epoch}.pt'
-        checkpoint = torch.load(filepath)
+        torch.cuda.empty_cache()
+        checkpoint = torch.load(filepath, map_location='cpu')
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.policy_net.load_state_dict(checkpoint['model_state_dict'])
         loss = checkpoint['loss']
@@ -269,7 +282,7 @@ class QTran:
         checkpoint = None
         if epoch >= 0:
             _, checkpoint = self.load_model(epoch, training=training)
-        policy = CentralNN()
+        policy = CentralNN(agents_n=self.agents_n)
         policy.load_state_dict(self.policy_net.state_dict())
         device = torch.device("cpu" if not self.using_cuda or cpu else "cuda")
         policy.to(device)
@@ -289,6 +302,7 @@ class QTran:
             # Reset env + initial render
             observations = env.reset()
             curr_scores = {a: 0 for a in env.agents}
+            actions = {a: 1 for a in env.agents}
             curr_steps = 0
             if debug and episode == episodes_n - 1:
                 env.aec_env.env.render()
@@ -296,7 +310,7 @@ class QTran:
             env_done = False
             # Running a single episode
             while not env_done:
-                actions = self.choose_actions(observations, greedy=True)
+                actions = self.choose_actions(observations, actions, greedy=True)
                 # try:
                 observations, rewards, dones, _ = env.step(actions)
                 env_done = all(dones.values())
