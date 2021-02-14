@@ -177,7 +177,7 @@ class CentralNN(nn.Module):
         jt_q_in = torch.stack([singles_out[a][1] for a in singles_out], dim=0).sum(dim=0)
         q_jt = self.jointQ(jt_q_in)
         v_jt = self.jointV(jt_v_in)
-        print([singles_out[a][4] for a in singles_out])
+        # print([singles_out[a][4] for a in singles_out])
         q_jt_prime = torch.stack([singles_out[a][3] for a in singles_out], dim=1).sum(dim=1)
         q_jt_prime_opt = torch.stack([singles_out[a][4] for a in singles_out], dim=1).sum(dim=1)
         # print(q_jt_prime)
