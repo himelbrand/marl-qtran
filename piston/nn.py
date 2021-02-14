@@ -69,10 +69,11 @@ class SingleQ(nn.Module):
         conv_h = conv2d_size_out(conv2d_size_out(conv2d_size_out(h)))
         linear_input_size = conv_h * conv_w * 32
 
-        self.hidden_v = nn.Linear(linear_input_size, features_n)
-        self.hidden_q = nn.Linear(linear_input_size + actions_n, features_n)
-        self.hidden = nn.Linear(features_n * 2, features_n)
+        self.hidden = nn.Linear(linear_input_size, features_n)
         self.q = nn.Linear(features_n, actions_n)
+
+        self.hidden_v = nn.Linear(linear_input_size + actions_n, features_n)
+        self.hidden_q = nn.Linear(linear_input_size + actions_n, features_n)
 
         if using_cuda:
             self.conv1.cuda()
@@ -85,20 +86,36 @@ class SingleQ(nn.Module):
             self.hidden_q.cuda()
             self.q.cuda()
 
-    def forward(self, obs, action):
+    def forward(self, obs, action=None):
         if not isinstance(obs, torch.Tensor):
             obs = to_tensor(obs, using_cuda=self.using_cuda)
-        if not isinstance(action, torch.Tensor):
+        if not isinstance(action, torch.Tensor) and action is not None:
             action = torch.tensor([action])
         obs = F.relu(self.bn1(self.conv1(obs)))
         obs = F.relu(self.bn2(self.conv2(obs)))
         obs = F.relu(self.bn3(self.conv3(obs)))
-        hidden_v_features = F.silu(self.hidden_v(obs.view(obs.size(0), -1)))
-        hidden_q_features = F.silu(self.hidden_q(torch.cat([action, obs.view(obs.size(0), -1)], dim=1)))
-        hidden_inputs = torch.cat([hidden_q_features, hidden_v_features], dim=1)
-        hidden_features = F.dropout(self.hidden(hidden_inputs), p=0.75)
-        q = torch.sigmoid(self.q(hidden_features))
-        return q, hidden_q_features, hidden_v_features
+        hidden_features = F.dropout(self.hidden(obs.view(obs.size(0), -1)), p=0.75)
+        q_values = self.q(hidden_features)
+        if action is not None:
+            opt_actions = torch.argmax(q_values, 1, keepdim=True).cpu()
+            one_hot_opt = torch.FloatTensor(q_values.shape)
+            one_hot_opt.zero_()
+            for i, opt in enumerate(opt_actions):
+                one_hot_opt[i][opt] = 1
+            if self.using_cuda:
+                one_hot_opt = one_hot_opt.to(device='cuda')
+            hidden_v_features = F.silu(
+                self.hidden_v(torch.cat([one_hot_opt * q_values, obs.view(obs.size(0), -1)], dim=1)))
+            hidden_q_features = F.silu(self.hidden_q(torch.cat([action * q_values, obs.view(obs.size(0), -1)], dim=1)))
+            q = torch.sum(action * q_values, dim=1, keepdim=True)
+            qmax = torch.max(q_values, dim=1, keepdim=True)
+        else:
+            hidden_v_features = None
+            hidden_q_features = None
+            q = None
+            qmax = None
+
+        return q_values, hidden_q_features, hidden_v_features, q, qmax
 
 
 class JointV(nn.Module):
@@ -115,7 +132,7 @@ class JointV(nn.Module):
     def forward(self, x):
         x = F.relu(self.hidden1(x))
         x = F.relu(self.hidden2(x))
-        x = torch.sigmoid(self.v(x))
+        x = self.v(x)
         return x
 
 
@@ -134,7 +151,7 @@ class JointQ(nn.Module):
         # x = torch.sigmoid(self.hidden(x))
         x = F.relu(self.hidden1(x))
         x = F.relu(self.hidden2(x))
-        x = torch.sigmoid(self.q(x))
+        x = self.q(x)
         return x
 
 
@@ -152,13 +169,16 @@ class CentralNN(nn.Module):
                 s.cuda()
 
     def forward(self, observations, actions=None):
-        if actions is None:
-            actions = {a: 1 for a in observations}
-        one_hot_actions = convert_to_one_hot_actions(actions, self.device)
+        one_hot_actions = convert_to_one_hot_actions(actions, self.device) if actions is not None else {a: None for a in
+                                                                                                        observations}
         singles_out = {agent: singleQ(observations[agent], one_hot_actions[agent]) for singleQ, agent in
                        zip(self.singleQs, observations)}
         jt_v_in = torch.stack([singles_out[a][2] for a in singles_out], dim=0).sum(dim=0)
         jt_q_in = torch.stack([singles_out[a][1] for a in singles_out], dim=0).sum(dim=0)
         q_jt = self.jointQ(jt_q_in)
         v_jt = self.jointV(jt_v_in)
-        return {a: singles_out[a][0] for a in singles_out}, q_jt, v_jt
+        q_jt_prime = torch.stack([singles_out[a][3] for a in singles_out], dim=1).sum(dim=1)
+        q_jt_prime_opt = torch.stack([singles_out[a][4] for a in singles_out], dim=1).sum(dim=1)
+        print(q_jt_prime)
+        print(q_jt_prime_opt)
+        return {a: singles_out[a][0] for a in singles_out}, q_jt, v_jt, q_jt_prime, q_jt_prime_opt

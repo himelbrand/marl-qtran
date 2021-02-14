@@ -67,9 +67,9 @@ def plot_all(s_epoch=0, e_epoch=5):
     plot(epochs, score, scores, steps, loss)
 
 
-def choose_actions(policy_net, observations, actions):
+def choose_actions(policy_net, observations):
     with torch.no_grad():
-        q_values = {agent: singleQ(observations[agent], actions[agent])[0].numpy() for singleQ, agent in
+        q_values = {agent: singleQ(observations[agent])[0].numpy() for singleQ, agent in
                     zip(policy_net.singleQs, observations)}
         actions = {agent: q_values[agent].argmax() for agent in observations}
         return actions
@@ -96,11 +96,12 @@ env = pistonball.parallel_env(n_pistons=15, local_ratio=0.2, time_penalty=-0.1, 
 # init Qtran
 q_tran = QTran(piston_n=15)
 
-q_tran.train(env, start_epoch=1, epochs_n=250)
+q_tran.train(env, start_epoch=0, epochs_n=250)
 print('Done training...')
 exit(0)
-for i in range(8):
+for i in range(10):
     policy, checkpoint = q_tran.get_policy(epoch=i, cpu=True)
+    print(checkpoint['epsilon'])
     def run_policy():
         # scoring and steps of episode
         observations = env.reset()
