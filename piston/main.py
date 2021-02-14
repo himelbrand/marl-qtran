@@ -96,7 +96,7 @@ env = pistonball.parallel_env(n_pistons=15, local_ratio=0.2, time_penalty=-0.1, 
 # init Qtran
 q_tran = QTran(piston_n=15)
 
-q_tran.train(env, start_epoch=0, epochs_n=250)
+q_tran.train(env, start_epoch=1, epochs_n=250)
 print('Done training...')
 exit(0)
 for i in range(10):

@@ -108,7 +108,7 @@ class SingleQ(nn.Module):
                 self.hidden_v(torch.cat([one_hot_opt * q_values, obs.view(obs.size(0), -1)], dim=1)))
             hidden_q_features = F.silu(self.hidden_q(torch.cat([action * q_values, obs.view(obs.size(0), -1)], dim=1)))
             q = torch.sum(action * q_values, dim=1, keepdim=True)
-            qmax = torch.max(q_values, dim=1, keepdim=True)
+            qmax = torch.max(q_values, dim=1, keepdim=True).values
         else:
             hidden_v_features = None
             hidden_q_features = None
@@ -177,8 +177,9 @@ class CentralNN(nn.Module):
         jt_q_in = torch.stack([singles_out[a][1] for a in singles_out], dim=0).sum(dim=0)
         q_jt = self.jointQ(jt_q_in)
         v_jt = self.jointV(jt_v_in)
+        print([singles_out[a][4] for a in singles_out])
         q_jt_prime = torch.stack([singles_out[a][3] for a in singles_out], dim=1).sum(dim=1)
         q_jt_prime_opt = torch.stack([singles_out[a][4] for a in singles_out], dim=1).sum(dim=1)
-        print(q_jt_prime)
-        print(q_jt_prime_opt)
+        # print(q_jt_prime)
+        # print(q_jt_prime_opt)
         return {a: singles_out[a][0] for a in singles_out}, q_jt, v_jt, q_jt_prime, q_jt_prime_opt

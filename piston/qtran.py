@@ -206,7 +206,7 @@ class QTran:
                     q_singles, q_jt, v_jt, q_jt_tag_nopt, q_jt_tag_opt = self.policy_net(tau_batch, actions_batch)
                     q_jt_hat = q_jt.detach()
                     u_bar = {a: torch.argmax(q_singles[a], dim=1).cpu().numpy() for a in q_singles}
-                    _, q_jt_opt, _ = self.policy_net(tau_batch, u_bar)
+                    _, q_jt_opt, _, _, _ = self.policy_net(tau_batch, u_bar)
                     q_jt_hat_opt = q_jt_opt.detach()
                     loss_td = torch.sum((q_jt - y_dqn) ** 2)
                     # q_jt_tag_opt = sum([torch.max(q_singles[a]) for a in q_singles])
