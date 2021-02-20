@@ -228,7 +228,11 @@ class QTran:
                     self.target_net.load_state_dict(self.policy_net.state_dict())
                     # if self.using_cuda:
                     #     start_event.record()
-
+            if env_done:
+                observations = env.reset()
+                # observations = {a: to_tensor(observations[a], False) for a in observations}
+            else:
+                observations = observations_n
             # if episode % 10 == 0 or episode == 1:
             #     end_event.record()
             #     torch.cuda.synchronize()

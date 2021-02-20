@@ -55,18 +55,19 @@ class SingleQ(nn.Module):
     def __init__(self, actions_n=3, w=120, h=457, features_n=32, using_cuda=False):
         super(SingleQ, self).__init__()
         self.using_cuda = using_cuda
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2)
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=5, stride=2, bias=False)
         self.bn1 = nn.BatchNorm2d(16)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2, bias=False)
         self.bn2 = nn.BatchNorm2d(32)
-        self.conv3 = nn.Conv2d(32, 32, kernel_size=5, stride=2)
-        self.bn3 = nn.BatchNorm2d(32)
+
+        # self.conv3 = nn.Conv2d(32, 32, kernel_size=5, stride=2, bias=False)
+        # self.bn3 = nn.BatchNorm2d(32)
 
         def conv2d_size_out(size, kernel_size=5, stride=2):
             return (size - (kernel_size - 1) - 1) // stride + 1
 
-        conv_w = conv2d_size_out(conv2d_size_out(conv2d_size_out(w)))
-        conv_h = conv2d_size_out(conv2d_size_out(conv2d_size_out(h)))
+        conv_w = conv2d_size_out(conv2d_size_out(w))
+        conv_h = conv2d_size_out(conv2d_size_out(h))
         linear_input_size = conv_h * conv_w * 32
 
         self.hidden = nn.Linear(linear_input_size, features_n)
@@ -80,28 +81,44 @@ class SingleQ(nn.Module):
             self.bn1.cuda()
             self.conv2.cuda()
             self.bn2.cuda()
-            self.conv3.cuda()
-            self.bn3.cuda()
+            # self.conv3.cuda()
+            # self.bn3.cuda()
             self.hidden_v.cuda()
             self.hidden_q.cuda()
             self.q.cuda()
 
     def forward(self, obs, action=None):
+        # start_event = torch.cuda.Event(enable_timing=True)
+        # end_event = torch.cuda.Event(enable_timing=True)
         if not isinstance(obs, torch.Tensor):
+            # start_event.record()
             obs = to_tensor(obs, using_cuda=self.using_cuda)
+            # end_event.record()
+            # torch.cuda.synchronize()
+            # print(f'time for to_tensor: {start_event.elapsed_time(end_event)}')
+        elif not obs.is_cuda and self.using_cuda:
+            obs = obs.to(device=torch.device('cuda'))
         if not isinstance(action, torch.Tensor) and action is not None:
             action = torch.tensor([action])
+        # start_event.record()
         obs = F.relu(self.bn1(self.conv1(obs)))
         obs = F.relu(self.bn2(self.conv2(obs)))
-        obs = F.relu(self.bn3(self.conv3(obs)))
-        hidden_features = F.dropout(self.hidden(obs.view(obs.size(0), -1)), p=0.75)
-        q_values = self.q(hidden_features)
+        # obs = F.relu(self.bn3(self.conv3(obs)))
+        # end_event.record()
+        # torch.cuda.synchronize()
+        # print(f'time for convs: {start_event.elapsed_time(end_event)}')
+        hidden_features = torch.sigmoid(self.hidden(obs.view(obs.size(0), -1)))
+        q_values = torch.sigmoid(self.q(hidden_features))
         if action is not None:
-            opt_actions = torch.argmax(q_values, 1, keepdim=True).cpu()
+            # start_event.record()
+            opt_actions = torch.argmax(q_values, 1, keepdim=True)
             one_hot_opt = torch.FloatTensor(q_values.shape)
             one_hot_opt.zero_()
             for i, opt in enumerate(opt_actions):
                 one_hot_opt[i][opt] = 1
+            # end_event.record()
+            # torch.cuda.synchronize()
+            # print(f'time for one-hot loop: {start_event.elapsed_time(end_event)}')
             if self.using_cuda:
                 one_hot_opt = one_hot_opt.to(device='cuda')
             hidden_v_features = F.silu(
@@ -132,7 +149,7 @@ class JointV(nn.Module):
     def forward(self, x):
         x = F.relu(self.hidden1(x))
         x = F.relu(self.hidden2(x))
-        x = self.v(x)
+        x = torch.sigmoid(self.v(x))
         return x
 
 
@@ -151,7 +168,7 @@ class JointQ(nn.Module):
         # x = torch.sigmoid(self.hidden(x))
         x = F.relu(self.hidden1(x))
         x = F.relu(self.hidden2(x))
-        x = self.q(x)
+        x = torch.sigmoid(self.q(x))
         return x
 
 
@@ -169,17 +186,55 @@ class CentralNN(nn.Module):
                 s.cuda()
 
     def forward(self, observations, actions=None):
+        # print('====== Forward central agent ======')
+        # start_event = torch.cuda.Event(enable_timing=True)
+        # end_event = torch.cuda.Event(enable_timing=True)
         one_hot_actions = convert_to_one_hot_actions(actions, self.device) if actions is not None else {a: None for a in
                                                                                                         observations}
+        # start_event.record()
         singles_out = {agent: singleQ(observations[agent], one_hot_actions[agent]) for singleQ, agent in
                        zip(self.singleQs, observations)}
-        jt_v_in = torch.stack([singles_out[a][2] for a in singles_out], dim=0).sum(dim=0)
-        jt_q_in = torch.stack([singles_out[a][1] for a in singles_out], dim=0).sum(dim=0)
-        q_jt = self.jointQ(jt_q_in)
-        v_jt = self.jointV(jt_v_in)
-        # print([singles_out[a][4] for a in singles_out])
-        q_jt_prime = torch.stack([singles_out[a][3] for a in singles_out], dim=1).sum(dim=1)
-        q_jt_prime_opt = torch.stack([singles_out[a][4] for a in singles_out], dim=1).sum(dim=1)
+        # end_event.record()
+        # torch.cuda.synchronize()
+        # print(f'time for single Q forward: {start_event.elapsed_time(end_event)}ms')
+        if actions is not None:
+            jt_v_in = torch.stack([singles_out[a][2] for a in singles_out], dim=0).sum(dim=0)
+            jt_q_in = torch.stack([singles_out[a][1] for a in singles_out], dim=0).sum(dim=0)
+            # start_event.record()
+            q_jt = self.jointQ(jt_q_in)
+            # end_event.record()
+            # torch.cuda.synchronize()
+            # print(f'time for joint Q forward: {start_event.elapsed_time(end_event)}ms')
+            # start_event.record()
+            q_jt_opt = self.jointQ(jt_v_in)
+            # end_event.record()
+            # torch.cuda.synchronize()
+            # print(f'time for joint Q opt forward: {start_event.elapsed_time(end_event)}ms')
+            # start_event.record()
+            v_jt = self.jointV(jt_v_in)
+            # end_event.record()
+            # torch.cuda.synchronize()
+            # print(f'time for joint V forward: {start_event.elapsed_time(end_event)}ms')
+            # print('='*50)
+            # print([singles_out[a][4] for a in singles_out])
+            q_jt_prime = torch.stack([singles_out[a][3] for a in singles_out], dim=1).sum(dim=1)
+            q_jt_prime_opt = torch.stack([singles_out[a][4] for a in singles_out], dim=1).sum(dim=1)
+        else:
+            q_jt, q_jt_opt, v_jt, q_jt_prime, q_jt_prime_opt = None, None, None, None, None
         # print(q_jt_prime)
         # print(q_jt_prime_opt)
-        return {a: singles_out[a][0] for a in singles_out}, q_jt, v_jt, q_jt_prime, q_jt_prime_opt
+        return {a: singles_out[a][0] for a in singles_out}, q_jt, q_jt_opt, v_jt, q_jt_prime, q_jt_prime_opt
+
+    def eval(self):
+        super(CentralNN, self).eval()
+        for sq in self.singleQs:
+            sq.eval()
+        self.jointQ.eval()
+        self.jointV.eval()
+
+    def train(self: T, mode: bool = True):
+        super(CentralNN, self).train(mode=mode)
+        for sq in self.singleQs:
+            sq.train(mode=mode)
+        self.jointQ.train(mode=mode)
+        self.jointV.train(mode=mode)
