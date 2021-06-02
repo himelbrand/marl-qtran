@@ -7,3 +7,5 @@ This repository is an implementation of [QTRAN](https://arxiv.org/pdf/1905.05408
 * [KAZ](https://www.pettingzoo.ml/butterfly/knights_archers_zombies)
 
 ### Note that this readme is still a WIP
+
+Plus the code files needs some rearranging
